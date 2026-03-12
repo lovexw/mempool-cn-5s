@@ -1,0 +1,66 @@
+<script>
+        const heightEl = document.getElementById('blockHeight');
+        const timeEl = document.getElementById('blockTime');
+        const statusEl = document.getElementById('wsStatus');
+        let pingInterval; // 定义心跳定时器
+
+        function connectWS() {
+            // 这里已经替换成你专属的代理域名
+            const ws = new WebSocket('wss://mempool-cn.btchao.com');
+
+            ws.onopen = () => {
+                statusEl.textContent = '🟢 已连接实时网络';
+                statusEl.className = 'status';
+                // 订阅区块数据
+                ws.send(JSON.stringify({ "action": "want", "data": ["blocks"] }));
+                
+                // 【核心修复】：心跳保活机制
+                // 每 50 秒给服务器发一个 ping，防止 Cloudflare 100秒超时断开
+                pingInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ "action": "ping" }));
+                        console.log("Ping sent to keep connection alive.");
+                    }
+                }, 30000); 
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // 监听到最新产出的区块
+                if (data.block) {
+                    const block = data.block;
+                    heightEl.textContent = block.height;
+                    
+                    const date = new Date(block.timestamp * 1000);
+                    const timeString = date.toLocaleTimeString('zh-CN', { hour12: false });
+                    const sizeMB = (block.size / 1000000).toFixed(2);
+                    
+                    timeEl.textContent = `出块时间: ${timeString} | 大小: ${sizeMB} MB`;
+                }
+                
+                // 初次连接时获取的最新区块历史记录
+                if (data.blocks && data.blocks.length > 0) {
+                    heightEl.textContent = data.blocks[0].height;
+                    const date = new Date(data.blocks[0].timestamp * 1000);
+                    timeEl.textContent = `最新时间: ${date.toLocaleTimeString('zh-CN', { hour12: false })}`;
+                }
+            };
+
+            ws.onclose = () => {
+                // 连接断开时，清理掉心跳定时器
+                clearInterval(pingInterval);
+                statusEl.textContent = '🔴 连接断开，3秒后重连...';
+                statusEl.className = 'status disconnected';
+                // 自动重连机制
+                setTimeout(connectWS, 3000);
+            };
+
+            ws.onerror = () => {
+                statusEl.textContent = '🔴 网络错误';
+                statusEl.className = 'status disconnected';
+            };
+        }
+
+        connectWS();
+    </script>
