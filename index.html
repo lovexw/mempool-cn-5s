@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>BTC Block Dashboard</title>
     <style>
         body {
@@ -16,7 +18,10 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
+            touch-action: none; /* 彻底干掉页面的滑动和多点触控 */
         }
+        
+        /* 默认样式（针对稍大一点的屏幕） */
         .title {
             font-size: 1.5rem;
             color: #888;
@@ -27,20 +32,41 @@
             font-weight: bold;
             margin: 0;
             text-shadow: 0 0 10px rgba(247, 147, 26, 0.5);
+            white-space: nowrap; /* 铁血防折行 */
         }
         .details {
             font-size: 1.2rem;
             color: #aaa;
             margin-top: 15px;
+            white-space: nowrap;
         }
         .status {
             position: absolute;
-            bottom: 20px;
+            bottom: 25px;
             font-size: 0.8rem;
             color: #0f0; 
         }
         .disconnected {
             color: #f00;
+        }
+
+        /* 📱 核心修复：专门针对 iPhone 5s (320px) 和类似小屏的自适应缩放 */
+        @media screen and (max-width: 375px) {
+            .title { 
+                font-size: 1.2rem; 
+                margin-bottom: 8px;
+            }
+            .height { 
+                font-size: 4.2rem; /* 缩小字号，保证6位数完美填满 320px 宽度 */
+            }
+            .details { 
+                font-size: 0.95rem; 
+                margin-top: 12px;
+            }
+            .status { 
+                bottom: 15px; 
+                font-size: 0.75rem; 
+            }
         }
     </style>
 </head>
@@ -61,33 +87,28 @@
         let forceReconnectTimeout;
 
         function connectWS() {
-            // 清理旧的定时器，防止重连时叠加爆内存
             if (pingInterval) clearInterval(pingInterval);
             if (forceReconnectTimeout) clearTimeout(forceReconnectTimeout);
 
-            // 这里写死你专属的代理域名
+            // 你的专属白嫖节点
             ws = new WebSocket('wss://mempool-cn.btchao.com');
 
             ws.onopen = () => {
                 statusEl.textContent = '🟢 实时同步中';
                 statusEl.className = 'status';
                 
-                // 订阅区块推送
                 ws.send(JSON.stringify({ "action": "want", "data": ["blocks"] }));
                 
-                // 维持 CF 活跃的常规 30 秒 Ping
                 pingInterval = setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ "action": "ping" }));
                     }
                 }, 30000);
 
-                // 【终极必杀技：防僵尸连接】
-                // 无论当前连接状态多好，每隔 5 分钟 (300000 毫秒) 强行斩断重连，重新拉取最新数据
                 forceReconnectTimeout = setTimeout(() => {
                     if (ws.readyState === WebSocket.OPEN) {
                         statusEl.textContent = '🔄 定时防死机刷新...';
-                        ws.close(); // 主动掐断，会立刻触发下面的 onclose 进行重连
+                        ws.close(); 
                     }
                 }, 300000); 
             };
@@ -95,12 +116,10 @@
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 
-                // 收到服务器主动推送的新区块
                 if (data.block) {
                     updateUI(data.block);
                 }
                 
-                // 每次刚连接/重连时，拉取到的最新区块缓存
                 if (data.blocks && data.blocks.length > 0) {
                     updateUI(data.blocks[0]);
                 }
@@ -118,7 +137,6 @@
             };
         }
 
-        // 把更新界面的逻辑独立出来，保持代码干净
         function updateUI(blockData) {
             heightEl.textContent = blockData.height;
             const date = new Date(blockData.timestamp * 1000);
@@ -127,7 +145,6 @@
             timeEl.textContent = `出块时间: ${timeString} | 大小: ${sizeMB} MB`;
         }
 
-        // 启动连接
         connectWS();
     </script>
 </body>
