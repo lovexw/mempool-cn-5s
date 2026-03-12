@@ -55,62 +55,79 @@
         const heightEl = document.getElementById('blockHeight');
         const timeEl = document.getElementById('blockTime');
         const statusEl = document.getElementById('wsStatus');
-        let pingInterval; 
+        
+        let ws;
+        let pingInterval;
+        let forceReconnectTimeout;
 
         function connectWS() {
-            // 这里已经写死了你专属的代理域名
-            const ws = new WebSocket('wss://mempool-cn.btchao.com');
+            // 清理旧的定时器，防止重连时叠加爆内存
+            if (pingInterval) clearInterval(pingInterval);
+            if (forceReconnectTimeout) clearTimeout(forceReconnectTimeout);
+
+            // 这里写死你专属的代理域名
+            ws = new WebSocket('wss://mempool-cn.btchao.com');
 
             ws.onopen = () => {
-                statusEl.textContent = '🟢 已连接实时网络';
+                statusEl.textContent = '🟢 实时同步中';
                 statusEl.className = 'status';
                 
-                // 告诉服务器我们需要订阅区块信息
+                // 订阅区块推送
                 ws.send(JSON.stringify({ "action": "want", "data": ["blocks"] }));
                 
-                // 30秒心跳保活机制，防止 Cloudflare 掐断连接
+                // 维持 CF 活跃的常规 30 秒 Ping
                 pingInterval = setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ "action": "ping" }));
-                        console.log("Ping sent: 30s heartbeat");
                     }
-                }, 30000); 
+                }, 30000);
+
+                // 【终极必杀技：防僵尸连接】
+                // 无论当前连接状态多好，每隔 5 分钟 (300000 毫秒) 强行斩断重连，重新拉取最新数据
+                forceReconnectTimeout = setTimeout(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        statusEl.textContent = '🔄 定时防死机刷新...';
+                        ws.close(); // 主动掐断，会立刻触发下面的 onclose 进行重连
+                    }
+                }, 300000); 
             };
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 
+                // 收到服务器主动推送的新区块
                 if (data.block) {
-                    const block = data.block;
-                    heightEl.textContent = block.height;
-                    
-                    const date = new Date(block.timestamp * 1000);
-                    const timeString = date.toLocaleTimeString('zh-CN', { hour12: false });
-                    const sizeMB = (block.size / 1000000).toFixed(2);
-                    
-                    timeEl.textContent = `出块时间: ${timeString} | 大小: ${sizeMB} MB`;
+                    updateUI(data.block);
                 }
                 
+                // 每次刚连接/重连时，拉取到的最新区块缓存
                 if (data.blocks && data.blocks.length > 0) {
-                    heightEl.textContent = data.blocks[0].height;
-                    const date = new Date(data.blocks[0].timestamp * 1000);
-                    timeEl.textContent = `最新时间: ${date.toLocaleTimeString('zh-CN', { hour12: false })}`;
+                    updateUI(data.blocks[0]);
                 }
             };
 
             ws.onclose = () => {
-                clearInterval(pingInterval);
-                statusEl.textContent = '🔴 连接断开，3秒后重连...';
+                statusEl.textContent = '🔴 连接重置中...';
                 statusEl.className = 'status disconnected';
-                setTimeout(connectWS, 3000);
+                setTimeout(connectWS, 2000);
             };
 
             ws.onerror = () => {
-                statusEl.textContent = '🔴 网络错误';
+                statusEl.textContent = '🔴 网络波动...';
                 statusEl.className = 'status disconnected';
             };
         }
 
+        // 把更新界面的逻辑独立出来，保持代码干净
+        function updateUI(blockData) {
+            heightEl.textContent = blockData.height;
+            const date = new Date(blockData.timestamp * 1000);
+            const timeString = date.toLocaleTimeString('zh-CN', { hour12: false });
+            const sizeMB = (blockData.size / 1000000).toFixed(2);
+            timeEl.textContent = `出块时间: ${timeString} | 大小: ${sizeMB} MB`;
+        }
+
+        // 启动连接
         connectWS();
     </script>
 </body>
